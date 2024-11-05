@@ -1,0 +1,49 @@
+  data.txt{
+    "jsonrpc": "2.0",
+    "method": "POST",
+    "params": {
+        "data": "{\"Ваше ФИО\": \"Чанзытпай Чинчи Кызыл-ооловна \", \"Дата рождения\": \"1979-11-27\", \"Программа обучения\": \"Преподаватель высшей школы 48000\\t р. 1124 ч.\", \"Форма обучения\": \"заочная>    },
+    "id": 421231592
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                [ Read 8 lines ]
+^G Help          ^O Write Out     ^W Where Is      ^K Cut           ^T Execute       ^C Location      M-U Undo         M-A Set Mark     M-] To Bracket   M-Q Previous     ^B Back          ^◂ Prev Word
+^X Exit          ^R Read File     ^\ Replace       ^U Paste         ^J Justify       ^/ Go To Line    M-E Redo         M-6 Copy         ^Q Where Was     M-W Next         ^F Forward       ^▸ Next Word
