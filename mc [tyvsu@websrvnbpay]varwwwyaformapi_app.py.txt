@@ -1,0 +1,180 @@
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from flask import Flask, request, jsonify
+from docx import Document
+import datetime
+import re
+from num2words import num2words
+
+app = Flask(__name__)
+
+# Настройки SMTP
+SMTP_SERVER = 'smtp-mail.outlook.com'
+SMTP_PORT = 587
+SMTP_USER = 'noreply@tuvsu.ru'
+SMTP_PASSWORD = 'Sow58232'
+FROM_EMAIL = 'noreply@tuvsu.ru'
+
+@app.route('/submit', methods=['POST'])
+def submit():
+    data = request.get_json()
+# Вывод полученных данных в отдельный текстовый файл, можно отключить. Делал для отладки.
+    file_path = '/home/tyvsu/yaforms/data.txt'
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(data, indent=4, ensure_ascii=False))
+
+    if not data or 'params' not in data or 'data' not in data['params']:
+        return jsonify({"error": "No data provided"}), 400
+
+    user_data_str = data['params']['data']
+    user_data = json.loads(user_data_str)
+
+    if 'Программа обучения' in user_data:
+        программа = user_data['Программа обучения']
+        название, стоимость, срок = parse_education_program(программа)
+        user_data['Программа обучения'] = название
+        user_data['Стоимость'] = стоимость
+
+        if стоимость:
+            половина_1, половина_2 = split_cost(стоимость)
+
+            user_data['Стоимость прописью'] = convert_to_words(стоимость)
+
+ user_data['Половина 1'] = str(половина_1)
+            user_data['Половина 1 пропись'] = convert_to_words(половина_1)
+            user_data['Половина 2'] = str(половина_2) user_data['Половина 2 пропись'] = convert_to_words(половина_2)
+
+        user_data['Срок обучения'] = срок
+# Путь к файлу шаблона, и генерируемому файлу, чувствителен к доступам, если перестанет работать проверить права пользователя www-data к файлам.
+    template_path = '/home/tyvsu/yaforms/test.docx'
+    output_path = '/home/tyvsu/yaforms/out.docx'
+
+    doc = Document(template_path)
+
+    for paragraph in doc.paragraphs:
+        _replace_placeholders(paragraph, user_data)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    _replace_placeholders(paragraph, user_data)
+
+    try:
+        doc.save(output_path)
+
+        if 'Почта' in user_data:
+            recipient_email = user_data['Почта']
+            send_email_with_attachment(recipient_email, output_path)
+
+        return jsonify({"message": "Данные успешно отправлены"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# Вычленяет из названия программы само название стоимость и срок, так что в названии надо указывать стоимость и срок через точки.
+def parse_education_program(строка):
+
+    pattern = r"(?P<название>.*?)\s*-\s*(?P<стоимость>\d+)\s*[рР]\.\s*(?P<срок>.+)"
+    match = re.search(pattern, строка)
+    if match:
+        название = match.group("название").strip()
+        стоимость = match.group("стоимость").strip()
+        срок = match.group("срок").strip()
+        return название, стоимость, срок
+    return строка, "", ""
+
+# Отвечает за преобразование чисел в текст, используется для прописного написания стоимости обучения
+def convert_to_words(number):
+    try:
+
+        return num2words(int(number), lang='ru')
+    except Exception as e:
+        return str(number) # Делит стоимость на две части (делит поровну, в исключительных случаях может ошибаться и приписывать всякие остатки, но крайне редко, так что можно не заморачиваться)
+def split_cost(стоимость):
+    try:
+        cost = int(стоимость)
+        половина_1 = cost // 2
+        половина_2 = cost - половина_1
+        return половина_1, половина_2
+    except ValueError:
+        return 0, 0
+# Кусок отвечающий за форматирование текста, не работает, надо доделать. Ну или можно так оставить, в принцие работает и без этого.
+def _replace_placeholders(paragraph, user_data):
+    for key, value in user_data.items():
+        if is_date(value):
+            value = format_date(value)
+        placeholder = '{{' + key + '}}'
+
+        if placeholder in paragraph.text:
+            full_text = "".join([run.text for run in paragraph.runs])
+            new_text = full_text.replace(placeholder, value)
+
+            if new_text != full_text:
+                total_length_diff = len(new_text) - len(full_text)
+                current_run_pos = 0
+                for run in paragraph.runs:
+                    if len(new_text) > current_run_pos:
+                        original_run_text_len = len(run.text)
+                        run.text = new_text[current_run_pos:current_run_pos +
+                                            original_run_text_len]
+                        current_run_pos += original_run_text_len
+                    else:
+                        run.text = ''
+
+                if total_length_diff > 0:
+                    additional_run = paragraph.add_run(
+                        new_text[current_run_pos:])
+                    additional_run.bold = paragraph.runs[0].bold
+                    additional_run.italic = paragraph.runs[0].italic
+                    additional_run.underline = paragraph.runs[0].underline
+                    additional_run.font.name = paragraph.runs[0].font.name
+                    additional_run.font.size = paragraph.runs[0].font.size
+   additional_run.font.color.rgb = paragraph.runs[0].font.color.rgb
+# отвечает за правильное форматирование дат
+def is_date(string, format="%Y-%m-%d"):
+    try:
+        datetime.datetime.strptime(string, format)
+        return True
+    except ValueError:
+        return False
+# та же хрень
+def format_date(date_str, from_format="%Y-%m-%d", to_format="%d.%m.%Y"): date_obj = datetime.datetime.strptime(date_str, from_format)
+    return date_obj.strftime(to_format)
+# отправка почты
+def send_email_with_attachment(to_email, attachment_path):
+    msg = MIMEMultipart()
+    msg['From'] = FROM_EMAIL
+    msg['To'] = to_email
+    msg['Subject'] = 'Договор ИППК ТувГУ'
+
+    body = '''Уважаемый слушатель!
+
+В приложении к данному письму вы найдете договор об оказании образовательных услуг. Пожалуйста, внимательно проверьте указанные в документе данные. После проверки поставьте подпись и отправьте нам отсканирова>
+
+Если у вас возникнут вопросы или потребуется дополнительная информация, свяжитесь с нами по телефону: 89997776655. Спасибо за сотрудничество!'''                                                                     msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        with open(attachment_path, 'rb') as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(attachment_path)}')
+            msg.attach(part)
+
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()  # Для использования TLS
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+
+
